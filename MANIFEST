@@ -1,0 +1,5 @@
+FindBin.pm			The module
+MANIFEST			This file
+Makefile.PL			MakeMaker input file
+ReadMe
+t/test1.t			simple test file

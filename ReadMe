@@ -1,0 +1,29 @@
+Please report any bugs/suggestions to Graham Barr <bodg@tiuk.ti.com>
+
+All files contained in this installation are Copyright (c) 1995 Graham Barr
+unless otherwise specified. All rights reserved.
+
+This library is free software; you can redistribute it and/or modify it under 
+the same terms as Perl itself.
+
+At time of release there was a bug in perl (NETaa14423) which stopped the
+use of this module being as intended
+
+ie
+
+ use FindBin qw($Bin $RealBin);
+ use lib "$Bin/../lib","$RealBin/../lib";
+
+a BEGIN can be used as a workaround
+
+ use FindBin qw($Bin $RealBin);
+ BEGIN { @LIBS = ("$Bin/../lib","$RealBin/../lib") }
+ use lib @LIBS;
+
+or
+
+ use FindBin qw($Bin $RealBin);
+ BEGIN { unshift(@INC, "$Bin/../lib","$RealBin/../lib") }
+
+
+
