@@ -1,66 +1,109 @@
 # This -*- perl -*- script makes the Makefile
-# $Id: Makefile.PL,v 1.1 1995/11/14 11:00:09 gbarr Exp gbarr $
+# $Id: Makefile.PL,v 1.3 1996/01/16 17:21:54 gbarr Exp $
 
 use ExtUtils::MakeMaker;
 use ExtUtils::Manifest qw(maniread);
+use lib qw(. ./lib);
+
+#--- Configuration section ---
+
+#--- End User Configuration - You should not have to change anything below this line
+
+require 5.001;
+use Getopt::Std;
+
+require 5.001;
+
+$NAME     = 'FindBin';
+
+$lib_only = 1;
+
+#--- End Configuration
+#--- MY package
+{
+ package MY;
+
+ sub libscan {
+  return '' if m,/(RCS|CVS)/, || m,[~%]$, || m,\.(orig|rej)$,;
+  $_;
+ }
+}
+#--- End MY package
 
 sub initialize {
  local($_);
 
  my $manifest = maniread();
 
- $Version = eval { require "./FindBin.pm"; FindBin->Version; } || "0.00";
-
- my %pl_files = ();
- my @exe_files = ();
+ my %PL_FILES = ();
+ my %EXE_FILES = ();
+ my %macro = ();
 
  foreach (keys %$manifest) {
-  $pl_files{$_} = $1 if(/(.*)\.PL\Z/ && !/^Makefile.PL$/);
-  push(@exe_files,$_) if(m#\bbin/# && !m#demo#);
+  $PL_FILES{$_} = $1 if(/(.*)\.PL\Z/ && !/^Makefile.PL$/);
+
+  if(m#\bbin/# && !m#demo#) {
+   my $f = $_;
+
+   $f =~ s#\.PL$##;
+
+   if(defined $install_pgm{$f} && $install_pgm{$f}) {
+    $EXE_FILES{$f} = 1 if(-x $f || -f "$f.PL");
+   }
+  }
  }
 
+ %EXE_FILES = () if($lib_only);
+
+ unless(defined $VERSION) {
+  my($pm,$rcs);
+
+  ($pm = $NAME . ".pm") =~ s,::,/,g;
+  $pm = "lib/" . $pm unless(-f $pm);
+
+  $VERSION  =  eval { require "./$pm"; ${"${NAME}::VERSION"} } || "0.00";
+  
+  ($rcs = $pm) =~ s:([^/]+\.pm):RCS/$1,v:;
+
+  # update VERSION when checked in
+  $macro{CONFIGDEP} = $rcs
+    if(-f $rcs);
+ }
+
+ $VERSION .= $RELTYPE if(defined $RELTYPE);
+
  my $hash = {
-	VERSION   => $Version,
-	NAME      => "FindBin",
-	SKIP      => [qw(static dynamic)],
-	PL_FILES  => \%pl_files,
-	EXE_FILES => \@exe_files,
+	VERSION   => $VERSION,
+	NAME      => $NAME,
+	SKIP      => [qw(static dynamic linkext)],
+	PL_FILES  => \%PL_FILES,
+	EXE_FILES => [ keys %EXE_FILES ],
+	LINKTYPE  => 'dynamic',
 
 	'dist'    => {COMPRESS => 'gzip -9f',
 		      SUFFIX   => 'gz', 
+		      POSTOP   => 'mv $(DISTNAME)-$(VERSION).tar.gz ../',
 		      DIST_DEFAULT => 'all tardist',
 		      CI => 'ci -l'
 		     },
 
-	'linkext' => {LINKTYPE => '' },
-	'clean'   => {FILES => '*% *.html *.bak *.old lib/*% lib/*/*% $(EXE_FILES)'},
+	'clean'   => {FILES => join(" ", qw(*% *.html *.bak *.old lib/*% lib/*/*%),values %PL_FILES)},
  };
 
+ $hash->{macro} = \%macro if(%macro);
+ $hash->{DISTNAME} = $DISTNAME if(defined $DISTNAME);
  $hash;
 }
 
-if ($ExtUtils::MakeMaker::Version < 4.17) {
- my $hash = initialize();
- WriteMakefile( %$hash ) ;
-}
-else {
- WriteMakefile( CONFIGURE => \&initialize ) ;
-}
+# -- Make the Makefile
 
-sub MY::test {
-    q{
-TEST_VERBOSE=0
+getopts("l") or
+ die "Usage: $0 [-l]\n";
 
-test:
-	$(FULLPERL) -I$(INST_LIB) -I$(PERL_ARCHLIB) -I$(PERL_LIB) -e 'use Test::Harness qw(&runtests $$verbose); $$verbose=$(TEST_VERBOSE); runtests @ARGV;' t/*.t
+$lib_only = 1 
+  if(defined $opt_l && $opt_l);
 
-};
-}
+my $hash = initialize();
+WriteMakefile( %$hash ) ;
 
-sub MY::libscan {
-    return '' if m:/(RCS|CVS)/:;
-    return '' if m/[~%]$/;
-    return '' if m/\.(orig|rej)$/;
-    $_;
-}
 

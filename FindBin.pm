@@ -26,14 +26,32 @@ of paths relative to the bin directory.
 This allows a user to setup a directory tree for some software with
 directories <root>/bin and <root>/lib and then the above example will allow
 the use of modules in the lib directory without knowing where the software
-tree is installed
+tree is installed.
+
+If perl is invoked using the -e option or the perl script is read from
+C<STDIN> then FindBin sets both C<$Bin> and C<$RealBin> to the current
+directory.
 
 =head1 EXPORTABLE VARIABLES
 
  $Bin         - path to bin directory from where script was invoked
- $Script      - name os script from which perl was invoked
+ $Script      - basename of script from which perl was invoked
  $RealBin     - $Bin with all links resolved
  $RealScript  - $Script with all links resolved
+
+=head1 KNOWN BUGS
+
+if perl is invoked as
+
+   perl filename
+
+and I<filename> does not have executable rights and a program called I<filename>
+exists in the users C<$ENV{PATH}> which satisfies both -x and -T then FindBin
+assumes that it was invoked via the C<$ENV{PATH}>.
+
+Workaround is to invoke perl as
+
+ perl ./filename
 
 =head1 AUTHORS
 
@@ -46,12 +64,9 @@ Copyright (c) 1995 Graham Barr & Nick Ing-Simmons. All rights reserved.
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.
 
-=head1 REVISION HISTORY
+=head1 REVISION
 
-# $Log: FindBin.pm,v $
-# Revision 1.1  1995/11/14  11:00:09  gbarr
-# Initial revision
-#
+$Revision: 1.4 $
 
 =cut
 
@@ -59,66 +74,149 @@ package FindBin;
 use Carp;
 require 5.000;
 require Exporter;
+use Cwd qw(getcwd);
 
-@EXPORT_OK = qw($Bin $Script $RealBin $RealScript);
+@EXPORT_OK = qw($Bin $Script $RealBin $RealScript $Dir $RealDir);
+%EXPORT_TAGS = (ALL => [qw($Bin $Script $RealBin $RealScript $Dir $RealDir)]);
 @ISA = qw(Exporter);
 
-$VERSION = sprintf("%d.%02d", q$Revision: 1.1 $ =~ /(\d+)\.(\d+)/);
+$VERSION = $VERSION = sprintf("%d.%02d", q$Revision: 1.4 $ =~ /(\d+)\.(\d+)/);
 
-sub Version { $VERSION }
+# Taken from Cwd.pm It is really getcwd with an optional
+# parameter instead of '.'
+#
+# another way would be:
+#
+#sub abs_path
+#{
+# my $cwd = getcwd();
+# chdir(shift || '.');
+# my $realpath = getcwd();
+# chdir($cwd);
+# $realpath;
+#}
 
-sub import
+sub abs_path
 {
-# Call the exporter package to do it's stuff
- my $pkg = shift;
- my($callpkg) = caller(0);
+    my $start = shift || '.';
+    my($dotdots, $cwd, @pst, @cst, $dir, @tst);
 
- $pkg->export($callpkg, @_);
-
-# Determine the paths
-
- $Bin        = undef;
- $Script     = undef;
- $RealBin    = undef;
- $RealScript = undef;
-
- my $script = $0;
-
- unless (-x $script)
-  {
-   local $dir;
-   foreach $dir (split(/:/,$ENV{PATH}))
+    unless (@cst = stat( $start ))
     {
-     if (-x "$dir/$script")
+	warn "stat($start): $!";
+	return '';
+    }
+    $cwd = '';
+    $dotdots = $start;
+    do
+    {
+	$dotdots .= '/..';
+	@pst = @cst;
+	unless (opendir(PARENT, $dotdots))
+	{
+	    warn "opendir($dotdots): $!";
+	    return '';
+	}
+	unless (@cst = stat($dotdots))
+	{
+	    warn "stat($dotdots): $!";
+	    closedir(PARENT);
+	    return '';
+	}
+	if ($pst[0] == $cst[0] && $pst[1] == $cst[1])
+	{
+	    $dir = '';
+	}
+	else
+	{
+	    do
+	    {
+		unless (defined ($dir = readdir(PARENT)))
+	        {
+		    warn "readdir($dotdots): $!";
+		    closedir(PARENT);
+		    return '';
+		}
+		$tst[0] = $pst[0]+1 unless (@tst = lstat("$dotdots/$dir"))
+	    }
+	    while ($dir eq '.' || $dir eq '..' || $tst[0] != $pst[0] ||
+		   $tst[1] != $pst[1]);
+	}
+	$cwd = "$dir/$cwd";
+	closedir(PARENT);
+    } while ($dir);
+    chop($cwd); # drop the trailing /
+    $cwd;
+}
+
+
+BEGIN
+{
+ *Dir = \$Bin;
+ *RealDir = \$RealBin;
+
+ if($0 eq '-e' || $0 eq '-')
+  {
+   # perl invoked with -e or script is on C<STDIN>
+
+   $Script = $RealScript = $0;
+   $Bin    = $RealBin    = getcwd();
+  }
+ else
+  {
+   my $script = $0;
+
+   unless($script =~ m#/# && -f $script)
+    {
+     my $dir;
+
+     foreach $dir (split(/:/,$ENV{PATH}))
       {
-       $script = "$dir/$script";
-       last;
+       if(-x "$dir/$script")
+        {
+         $script = "$dir/$script";
+   
+         if (-f $0) 
+          {
+           # $script has been found via PATH but perl could have
+           # been invoked as 'perl file'. Do a dumb check to see
+           # if $script is a perl program, if not then $script = $0
+           #
+           # well we actually only check that it is an ASCII file
+           # we know its executable so it is probably a script
+           # of some sort.
+   
+           $script = $0 unless(-T $script);
+          }
+         last;
+        }
       }
     }
-  }
-
- croak("Cannot find executable $0") unless (-x $script);
-
- $script =~ s,^\./,,;
-
- unless( "/" eq substr($script,0,1))
-  {
-   require Cwd;
-   $script = Cwd::getcwd() . "/" . $script;
-  }
-
- ($Bin,$Script) = $script =~ m,^(.*)/([^/]+)$,;
-
- while(1)
-  {
-   my $linktext = readlink($script);
-
-   ($RealBin,$RealScript) = $script =~ m,^(.*)/([^/]+)$,;
-   last unless defined $linktext;
-
-   $script = ("/" eq substr($linktext,0,1))
-              ? $linktext
-              : $RealBin . "/" . $linktext;
+  
+   croak("Cannot find current script '$0'") unless(-f $script);
+  
+   # Ensure $script contains the complete path incase we C<chdir>
+  
+   $script = getcwd() . "/" . $script unless($script =~ m,^/,);
+  
+   ($Bin,$Script) = $script =~ m,^(.*?)/+([^/]+)$,;
+  
+   # Resolve $script if it is a link
+   while(1)
+    {
+     my $linktext = readlink($script);
+  
+     ($RealBin,$RealScript) = $script =~ m,^(.*?)/+([^/]+)$,;
+     last unless defined $linktext;
+  
+     $script = ($linktext =~ m,^/,)
+                ? $linktext
+                : $RealBin . "/" . $linktext;
+    }
+  
+   # Get absolute paths to directories
+   $Bin     = abs_path($Bin)     if($Bin);
+   $RealBin = abs_path($RealBin) if($RealBin);
   }
 }
 
